@@ -1,6 +1,16 @@
-# BrokenLens
+<p align="center">
+  <img src="docs/images/logo.png?raw=true" alt="BrokenLens Logo" width="130" style="border-radius: 24px;" />
+</p>
 
-High-throughput broken link, dead asset, and SEO mixed-content auditor in a single Go binary with an embedded React 19 interactive report studio and CI/CD failure gating.
+<h1 align="center">BrokenLens</h1>
+
+<p align="center">
+  <strong>High-Throughput Broken Link, Dead Asset &amp; SEO Mixed-Content Auditor in a Single Binary</strong>
+</p>
+
+<p align="center">
+  <img src="docs/images/brokenlens_demo.gif?raw=true" alt="BrokenLens Live Audit Demo" width="100%" style="border-radius: 12px; border: 1px solid #27272a;" />
+</p>
 
 ---
 
@@ -26,10 +36,26 @@ It runs as a standalone single-binary command-line tool, executes crawls at high
   - **Orphan Page Detection**: Identifies internal pages with zero inbound links.
 - **Mixed Content Detection**: Flags insecure `http://` assets referenced on `https://` parent pages, categorizing them into Active (critical) and Passive (warning) violations.
 - **Redirect Chain Tracer**: Traces multi-hop redirects (301, 302, 307, 308) and detects circular loops ($A \to B \to A$).
-- **Differential PR Gating**: Compares current scans against baseline reports (`--diff baseline.json`) with `--fail-on-new-broken` to fail CI only when a pull request introduces *new* regressions.
+- **Differential PR Gating**: Compares current scans against baseline reports (`--diff baseline.json`) with `--fail-on-new-broken` to fail CI only when a pull request introduces new regressions.
 - **Protected Staging Audits**: Supports HTTP Basic Auth (`--auth`), custom headers (`--header`), and session cookies (`--cookie`).
 - **Resilient Rate Limiting**: Automatically handles HTTP 429 and 503 responses with `Retry-After` backoff.
 - **Embedded Web Studio**: React 19 dashboard embedded inside the binary via `embed.FS` with real-time Server-Sent Events (SSE) updates, interactive filtering, and code snippet inspection.
+
+---
+
+## Visual Studio & Responsive Cockpit
+
+BrokenLens provides an embedded dark-mode cockpit built with React 19 and Tailwind CSS, responsive across desktop, tablet, and mobile viewports:
+
+<p align="center">
+  <img src="docs/images/brokenlens_dashboard.png?raw=true" alt="BrokenLens Desktop Dashboard" width="100%" style="border-radius: 8px; border: 1px solid #27272a; margin-bottom: 16px;" />
+</p>
+
+### Responsive Multi-Device Adaptability
+
+| Desktop Redirect Inspector | Mobile Responsive Cockpit (390px) |
+| :---: | :---: |
+| <img src="docs/images/brokenlens_redirects.png?raw=true" alt="Redirect Chains View" width="560" style="border-radius: 8px; border: 1px solid #27272a;" /> | <img src="docs/images/brokenlens_mobile.png?raw=true" alt="Mobile View" width="280" style="border-radius: 8px; border: 1px solid #27272a;" /> |
 
 ---
 
@@ -75,7 +101,7 @@ Compare the current pull request branch against a baseline report from `main`:
   --output report.json
 ```
 
-The process exits with code 1 *only* if the pull request introduces new broken items, ignoring pre-existing legacy issues.
+The process exits with code 1 only if the pull request introduces new broken items, ignoring pre-existing legacy issues.
 
 ### Launch Interactive Report Studio
 
