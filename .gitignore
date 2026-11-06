@@ -2,6 +2,7 @@
 /brokenlens
 /brokenlens.exe
 *.exe
+dist/
 
 # Dependencies
 web/node_modules/
