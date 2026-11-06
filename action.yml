@@ -16,23 +16,98 @@ inputs:
   max-depth:
     description: 'Maximum link crawl depth (0 = unlimited)'
     required: false
-    default: '5'
+    default: '10'
+  max-urls:
+    description: 'Maximum number of URLs to crawl (0 = unlimited)'
+    required: false
+    default: '0'
+  timeout:
+    description: 'Per-request timeout in seconds'
+    required: false
+    default: '10'
   fail-on-broken:
     description: 'Whether to fail the build if broken assets or links are found'
     required: false
     default: 'true'
-  check-external:
-    description: 'Verify status of external hyperlinks'
+  fail-on-new-broken:
+    description: 'Whether to fail the build only if new broken links are introduced relative to baseline'
+    required: false
+    default: 'false'
+  diff:
+    description: 'Path to baseline report JSON file for differential comparison'
+    required: false
+    default: ''
+  check-seo:
+    description: 'Audit canonicals, meta robots, social images, and soft 404s'
     required: false
     default: 'true'
+  check-external:
+    description: 'Verify HTTP status of external hyperlinks'
+    required: false
+    default: 'true'
+  check-fragments:
+    description: 'Verify in-page #anchor existence in target DOM'
+    required: false
+    default: 'true'
+  check-mixed-content:
+    description: 'Detect HTTP assets embedded on HTTPS pages'
+    required: false
+    default: 'true'
+  robots:
+    description: 'Respect robots.txt crawl directives'
+    required: false
+    default: 'true'
+  sitemap:
+    description: 'Auto-discover and crawl URLs from sitemap.xml'
+    required: false
+    default: 'true'
+  auth:
+    description: 'HTTP Basic Auth credentials (username:password)'
+    required: false
+    default: ''
+  header:
+    description: 'Custom HTTP headers (Key: Value, separated by ||)'
+    required: false
+    default: ''
+  cookie:
+    description: 'Custom Cookie header string'
+    required: false
+    default: ''
   output:
-    description: 'Report JSON output file path'
+    description: 'Report output file path (.json or .csv)'
     required: false
     default: 'brokenlens-report.json'
   junit:
     description: 'JUnit XML report file path'
     required: false
     default: 'brokenlens-junit.xml'
+  markdown:
+    description: 'Markdown step summary output file path'
+    required: false
+    default: ''
+
+outputs:
+  total-scanned:
+    description: 'Total number of URLs crawled and scanned'
+    value: ${{ steps.brokenlens-run.outputs.total-scanned }}
+  total-broken:
+    description: 'Total number of broken links and missing assets detected'
+    value: ${{ steps.brokenlens-run.outputs.total-broken }}
+  health-score:
+    description: 'Calculated site health score from 0.0 to 100.0'
+    value: ${{ steps.brokenlens-run.outputs.health-score }}
+  total-redirects:
+    description: 'Total number of redirect chains detected'
+    value: ${{ steps.brokenlens-run.outputs.total-redirects }}
+  total-mixed-content:
+    description: 'Total number of mixed-content violations detected'
+    value: ${{ steps.brokenlens-run.outputs.total-mixed-content }}
+  report-path:
+    description: 'Path to generated JSON or CSV report file'
+    value: ${{ steps.brokenlens-run.outputs.report-path }}
+  junit-path:
+    description: 'Path to generated JUnit XML report file'
+    value: ${{ steps.brokenlens-run.outputs.junit-path }}
 
 runs:
   using: 'composite'
@@ -41,17 +116,69 @@ runs:
       uses: actions/setup-go@v5
       with:
         go-version: '1.23'
-        check-latest: true
+        check-latest: false
 
     - name: Run BrokenLens Audit
+      id: brokenlens-run
       shell: bash
       run: |
-        ARGS="${{ inputs.url }} --concurrency ${{ inputs.concurrency }} --max-depth ${{ inputs.max-depth }}"
+        BIN_NAME="brokenlens"
+        if [ "$RUNNER_OS" = "Windows" ]; then
+          BIN_NAME="brokenlens.exe"
+        fi
+        BIN_PATH="${{ runner.temp }}/$BIN_NAME"
+
+        echo "Building BrokenLens from action repository..."
+        (cd "${{ github.action_path }}" && go build -ldflags="-s -w" -o "$BIN_PATH" ./cmd/brokenlens)
+
+        ARGS="${{ inputs.url }}"
+        if [ -n "${{ inputs.concurrency }}" ]; then
+          ARGS="$ARGS --concurrency ${{ inputs.concurrency }}"
+        fi
+        if [ -n "${{ inputs.max-depth }}" ]; then
+          ARGS="$ARGS --max-depth ${{ inputs.max-depth }}"
+        fi
+        if [ -n "${{ inputs.max-urls }}" ] && [ "${{ inputs.max-urls }}" != "0" ]; then
+          ARGS="$ARGS --max-urls ${{ inputs.max-urls }}"
+        fi
+        if [ -n "${{ inputs.timeout }}" ]; then
+          ARGS="$ARGS --timeout ${{ inputs.timeout }}"
+        fi
         if [ "${{ inputs.fail-on-broken }}" = "true" ]; then
           ARGS="$ARGS --fail-on-broken"
         fi
-        if [ "${{ inputs.check-external }}" = "true" ]; then
-          ARGS="$ARGS --check-external"
+        if [ "${{ inputs.fail-on-new-broken }}" = "true" ]; then
+          ARGS="$ARGS --fail-on-new-broken"
+        fi
+        if [ -n "${{ inputs.diff }}" ]; then
+          ARGS="$ARGS --diff ${{ inputs.diff }}"
+        fi
+        if [ "${{ inputs.check-seo }}" = "false" ]; then
+          ARGS="$ARGS --check-seo=false"
+        fi
+        if [ "${{ inputs.check-external }}" = "false" ]; then
+          ARGS="$ARGS --check-external=false"
+        fi
+        if [ "${{ inputs.check-fragments }}" = "false" ]; then
+          ARGS="$ARGS --check-fragments=false"
+        fi
+        if [ "${{ inputs.check-mixed-content }}" = "false" ]; then
+          ARGS="$ARGS --check-mixed-content=false"
+        fi
+        if [ "${{ inputs.robots }}" = "false" ]; then
+          ARGS="$ARGS --robots=false"
+        fi
+        if [ "${{ inputs.sitemap }}" = "false" ]; then
+          ARGS="$ARGS --sitemap=false"
+        fi
+        if [ -n "${{ inputs.auth }}" ]; then
+          ARGS="$ARGS --auth '${{ inputs.auth }}'"
+        fi
+        if [ -n "${{ inputs.header }}" ]; then
+          ARGS="$ARGS --header '${{ inputs.header }}'"
+        fi
+        if [ -n "${{ inputs.cookie }}" ]; then
+          ARGS="$ARGS --cookie '${{ inputs.cookie }}'"
         fi
         if [ -n "${{ inputs.output }}" ]; then
           ARGS="$ARGS --output ${{ inputs.output }}"
@@ -59,5 +186,9 @@ runs:
         if [ -n "${{ inputs.junit }}" ]; then
           ARGS="$ARGS --junit ${{ inputs.junit }}"
         fi
+        if [ -n "${{ inputs.markdown }}" ]; then
+          ARGS="$ARGS --markdown ${{ inputs.markdown }}"
+        fi
 
-        go run ./cmd/brokenlens $ARGS
+        echo "Running BrokenLens: $BIN_PATH $ARGS"
+        "$BIN_PATH" $ARGS

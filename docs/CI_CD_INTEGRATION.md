@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Audit Website
-        uses: alexandrmotologa/brokenlens@main
+        uses: alexandrmotologa/brokenlens@v1
         with:
           url: 'https://example.com'
           concurrency: '30'

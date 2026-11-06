@@ -153,7 +153,9 @@ Open `http://127.0.0.1:8080` in your browser to view live crawl progress, search
 
 ---
 
-## GitHub Actions Example
+## GitHub Actions (Marketplace)
+
+BrokenLens is available directly as a GitHub Action on GitHub Marketplace:
 
 ```yaml
 name: Pull Request Link & SEO Audit
@@ -170,20 +172,23 @@ jobs:
         run: curl -s https://example.com/reports/main.json -o baseline.json || echo "{}" > baseline.json
 
       - name: Run BrokenLens Differential Gate
-        uses: alexandrmotologa/brokenlens@main
+        id: brokenlens
+        uses: alexandrmotologa/brokenlens@v1
         with:
           url: 'https://staging.example.com'
           concurrency: '30'
           max-depth: '5'
           fail-on-broken: 'false'
+          fail-on-new-broken: 'true'
+          diff: 'baseline.json'
           output: 'pr-report.json'
           junit: 'junit.xml'
 
-      - name: Verify No Regressions
+      - name: Verify Results
         run: |
-          go run ./cmd/brokenlens https://staging.example.com \
-            --diff baseline.json \
-            --fail-on-new-broken
+          echo "Health Score: ${{ steps.brokenlens.outputs.health-score }}/100"
+          echo "Total Scanned: ${{ steps.brokenlens.outputs.total-scanned }}"
+          echo "New Broken Items: ${{ steps.brokenlens.outputs.total-broken }}"
 ```
 
 ---

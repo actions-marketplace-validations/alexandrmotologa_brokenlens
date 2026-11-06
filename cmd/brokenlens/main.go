@@ -125,6 +125,24 @@ func main() {
 	// GitHub Actions Step Summary auto-detection
 	_ = reporter.WriteGitHubStepSummary(report)
 
+	// GitHub Actions Step Output auto-detection
+	if ghOutput := os.Getenv("GITHUB_OUTPUT"); ghOutput != "" {
+		if f, err := os.OpenFile(ghOutput, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+			fmt.Fprintf(f, "total-scanned=%d\n", report.Summary.TotalScanned)
+			fmt.Fprintf(f, "total-broken=%d\n", report.Summary.TotalBroken)
+			fmt.Fprintf(f, "health-score=%.2f\n", report.Summary.HealthScore)
+			fmt.Fprintf(f, "total-redirects=%d\n", report.Summary.TotalRedirects)
+			fmt.Fprintf(f, "total-mixed-content=%d\n", report.Summary.TotalMixedContent)
+			if cfg.OutputFile != "" {
+				fmt.Fprintf(f, "report-path=%s\n", cfg.OutputFile)
+			}
+			if cfg.JUnitFile != "" {
+				fmt.Fprintf(f, "junit-path=%s\n", cfg.JUnitFile)
+			}
+			_ = f.Close()
+		}
+	}
+
 	// If --serve was requested alongside TargetURL, start server with completed report
 	if cfg.Serve {
 		srv := server.NewServer(cfg, report)
