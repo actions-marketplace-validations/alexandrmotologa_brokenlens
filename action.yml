@@ -1,0 +1,63 @@
+name: 'BrokenLens Web Quality & Dead Link Auditor'
+description: 'High-throughput broken link, dead asset and SEO mixed-content auditor with CI/CD gating'
+author: 'Alexandr Motologa'
+branding:
+  icon: 'search'
+  color: 'red'
+
+inputs:
+  url:
+    description: 'Target website or staging URL to audit'
+    required: true
+  concurrency:
+    description: 'Number of concurrent workers (1-250)'
+    required: false
+    default: '25'
+  max-depth:
+    description: 'Maximum link crawl depth (0 = unlimited)'
+    required: false
+    default: '5'
+  fail-on-broken:
+    description: 'Whether to fail the build if broken assets or links are found'
+    required: false
+    default: 'true'
+  check-external:
+    description: 'Verify status of external hyperlinks'
+    required: false
+    default: 'true'
+  output:
+    description: 'Report JSON output file path'
+    required: false
+    default: 'brokenlens-report.json'
+  junit:
+    description: 'JUnit XML report file path'
+    required: false
+    default: 'brokenlens-junit.xml'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.23'
+        check-latest: true
+
+    - name: Run BrokenLens Audit
+      shell: bash
+      run: |
+        ARGS="${{ inputs.url }} --concurrency ${{ inputs.concurrency }} --max-depth ${{ inputs.max-depth }}"
+        if [ "${{ inputs.fail-on-broken }}" = "true" ]; then
+          ARGS="$ARGS --fail-on-broken"
+        fi
+        if [ "${{ inputs.check-external }}" = "true" ]; then
+          ARGS="$ARGS --check-external"
+        fi
+        if [ -n "${{ inputs.output }}" ]; then
+          ARGS="$ARGS --output ${{ inputs.output }}"
+        fi
+        if [ -n "${{ inputs.junit }}" ]; then
+          ARGS="$ARGS --junit ${{ inputs.junit }}"
+        fi
+
+        go run ./cmd/brokenlens $ARGS

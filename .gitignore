@@ -1,0 +1,22 @@
+# Binaries
+/brokenlens
+/brokenlens.exe
+*.exe
+
+# Dependencies
+web/node_modules/
+node_modules/
+
+# Test and run outputs
+*.json
+!web/package.json
+!web/package-lock.json
+!web/tsconfig*.json
+*.csv
+*.xml
+*.log
+*.tmp
+
+# Operating System
+.DS_Store
+Thumbs.db
