@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/alexandrmotologa/brokenlens/internal/analyzer"
 	"github.com/alexandrmotologa/brokenlens/internal/config"
 	"github.com/alexandrmotologa/brokenlens/internal/extractor"
 	"github.com/alexandrmotologa/brokenlens/internal/model"
@@ -23,6 +24,7 @@ type CrawlTask struct {
 	SourceURL  string
 	AnchorText string
 	Fragment   string
+	Snippet    string
 }
 
 // ProgressStats captures live crawl statistics.
@@ -175,6 +177,11 @@ func (e *Engine) Run(ctx context.Context) (*model.AuditReport, error) {
 		e.validateAllAnchors()
 	}
 
+	// Post-crawl: Evaluate canonical URLs and orphan pages
+	if e.cfg.CheckSEO {
+		e.auditCanonicalsAndOrphans(rootURL)
+	}
+
 	// Assemble final report
 	report := e.compileReport()
 	return report, nil
@@ -221,6 +228,7 @@ func (e *Engine) enqueueTask(task CrawlTask) bool {
 				AssetType: task.AssetType,
 				Text:      task.AnchorText,
 				Fragment:  task.Fragment,
+				Snippet:   task.Snippet,
 			})
 			e.inboundMu.Unlock()
 		}
@@ -238,6 +246,7 @@ func (e *Engine) enqueueTask(task CrawlTask) bool {
 			AssetType: task.AssetType,
 			Text:      task.AnchorText,
 			Fragment:  task.Fragment,
+			Snippet:   task.Snippet,
 		})
 		e.inboundMu.Unlock()
 	}
@@ -329,6 +338,26 @@ func (e *Engine) processTask(ctx context.Context, task CrawlTask) {
 		if err == nil {
 			crawlResult.DOMFragments = ext.DOMFragments
 			crawlResult.ExtractedLinks = len(ext.Targets)
+			crawlResult.RobotsMeta = ext.RobotsMeta
+			crawlResult.CanonicalURL = ext.CanonicalURL
+			crawlResult.PageTitle = ext.PageTitle
+
+			// SEO Audits
+			if e.cfg.CheckSEO {
+				if issue := extractor.DetectSoft404(task.URL, resp.StatusCode, ext.PageTitle, resp.Body); issue != nil {
+					issue.IsInternal = task.IsInternal
+					e.issuesMu.Lock()
+					e.issues = append(e.issues, *issue)
+					e.issuesMu.Unlock()
+				}
+
+				if issue := extractor.AuditMetaRobots(task.URL, ext.RobotsMeta, resp.XRobotsTag); issue != nil {
+					issue.IsInternal = task.IsInternal
+					e.issuesMu.Lock()
+					e.issues = append(e.issues, *issue)
+					e.issuesMu.Unlock()
+				}
+			}
 
 			// Enqueue discovered child links and assets
 			if e.cfg.MaxDepth == 0 || task.Depth < e.cfg.MaxDepth {
@@ -341,6 +370,8 @@ func (e *Engine) processTask(ctx context.Context, task CrawlTask) {
 					// Audit Mixed Content
 					if e.cfg.CheckMixedContent {
 						if issue := extractor.CheckMixedContent(task.URL, normURL, target.AssetType); issue != nil {
+							issue.IsInternal = task.IsInternal
+							issue.Snippet = target.Snippet
 							e.issuesMu.Lock()
 							e.issues = append(e.issues, *issue)
 							e.issuesMu.Unlock()
@@ -367,6 +398,7 @@ func (e *Engine) processTask(ctx context.Context, task CrawlTask) {
 						SourceURL:  task.URL,
 						AnchorText: target.Text,
 						Fragment:   frag,
+						Snippet:    target.Snippet,
 					})
 				}
 			}
@@ -394,6 +426,8 @@ func (e *Engine) evaluateIssues(task CrawlTask, resp *FetchResponse, result *mod
 			ErrorMessage: fmt.Sprintf("Circular redirect loop: %s", resp.Error.Error()),
 			AssetType:    task.AssetType,
 			Context:      fmt.Sprintf("%d hops before loop", len(resp.RedirectChain)),
+			Snippet:      task.Snippet,
+			IsInternal:   task.IsInternal,
 		})
 		e.issuesMu.Unlock()
 		return
@@ -412,6 +446,8 @@ func (e *Engine) evaluateIssues(task CrawlTask, resp *FetchResponse, result *mod
 			StatusCode:   resp.StatusCode,
 			ErrorMessage: fmt.Sprintf("Excessive redirects (%d hops exceed limit of %d)", len(resp.RedirectChain), e.cfg.MaxRedirects),
 			AssetType:    task.AssetType,
+			Snippet:      task.Snippet,
+			IsInternal:   task.IsInternal,
 		})
 		e.issuesMu.Unlock()
 	}
@@ -445,6 +481,8 @@ func (e *Engine) evaluateIssues(task CrawlTask, resp *FetchResponse, result *mod
 			ErrorMessage: errMsg,
 			AssetType:    task.AssetType,
 			Context:      context,
+			Snippet:      task.Snippet,
+			IsInternal:   task.IsInternal,
 		})
 		e.issuesMu.Unlock()
 	}
@@ -476,6 +514,54 @@ func (e *Engine) validateAllAnchors() {
 	}
 }
 
+func (e *Engine) auditCanonicalsAndOrphans(rootURL string) {
+	e.visitedMu.RLock()
+	defer e.visitedMu.RUnlock()
+	e.inboundMu.RLock()
+	defer e.inboundMu.RUnlock()
+
+	for u, res := range e.visited {
+		if res == nil {
+			continue
+		}
+
+		// Canonical check
+		if res.CanonicalURL != "" {
+			normCanon, _, err := NormalizeURL(res.CanonicalURL, u)
+			if err == nil {
+				canonRes := e.visited[normCanon]
+				if issue := extractor.AuditCanonical(u, normCanon, canonRes); issue != nil {
+					issue.IsInternal = res.IsInternal
+					e.issuesMu.Lock()
+					e.issues = append(e.issues, *issue)
+					e.issuesMu.Unlock()
+				}
+			}
+		}
+
+		// Orphan page check (internal HTML page not root, with 0 inbound references)
+		if res.IsInternal && (res.AssetType == model.AssetLink || res.AssetType == "") && u != rootURL {
+			inbounds := e.inboundMap[u]
+			if len(inbounds) == 0 {
+				e.issuesMu.Lock()
+				e.issues = append(e.issues, model.AuditIssue{
+					ID:           fmt.Sprintf("orphan-%s", u),
+					Type:         model.IssueOrphanPage,
+					Severity:     model.SeverityInfo,
+					TargetURL:    u,
+					SourceURL:    "",
+					StatusCode:   res.StatusCode,
+					ErrorMessage: "Orphan page: No internal links point to this page",
+					AssetType:    model.AssetLink,
+					Context:      "Zero inbound links",
+					IsInternal:   true,
+				})
+				e.issuesMu.Unlock()
+			}
+		}
+	}
+}
+
 func (e *Engine) compileReport() *model.AuditReport {
 	e.visitedMu.RLock()
 	defer e.visitedMu.RUnlock()
@@ -494,6 +580,7 @@ func (e *Engine) compileReport() *model.AuditReport {
 	assetDist := make(map[string]int)
 	var internalCount, externalCount int
 	var missingAnchorCount, mixedContentCount int
+	var orphanCount, soft404Count, canonicalIssueCount int
 
 	for _, issue := range e.issues {
 		switch issue.Type {
@@ -501,6 +588,12 @@ func (e *Engine) compileReport() *model.AuditReport {
 			missingAnchorCount++
 		case model.IssueMixedContentActive, model.IssueMixedContentPassive:
 			mixedContentCount++
+		case model.IssueOrphanPage:
+			orphanCount++
+		case model.IssueSoft404:
+			soft404Count++
+		case model.IssueBrokenCanonical, model.IssueCanonicalMismatch:
+			canonicalIssueCount++
 		}
 	}
 
@@ -576,16 +669,26 @@ func (e *Engine) compileReport() *model.AuditReport {
 		TotalRedirects:         len(redirectChains),
 		TotalMixedContent:      mixedContentCount,
 		TotalMissingAnchors:    missingAnchorCount,
+		TotalOrphanPages:       orphanCount,
+		TotalSoft404:           soft404Count,
+		TotalCanonicalIssues:   canonicalIssueCount,
 		HealthScore:            healthScore,
 		StatusCodeDistribution: statusDist,
 		AssetTypeDistribution:  assetDist,
 		RequestsPerSecond:      rps,
 	}
 
-	return &model.AuditReport{
+	report := &model.AuditReport{
 		Summary:        summary,
 		Issues:         e.issues,
 		RedirectChains: redirectChains,
 		Results:        results,
 	}
+
+	// Run Differential Comparison if baseline is specified
+	if e.cfg.DiffBaseline != "" {
+		_, _ = analyzer.CompareWithBaseline(report, e.cfg.DiffBaseline)
+	}
+
+	return report
 }

@@ -41,6 +41,16 @@ type Config struct {
 	Quiet              bool
 	ReportFile         string // For 'brokenlens serve --report report.json'
 
+	// Auth and custom request parameters
+	BasicAuth       string
+	Headers         map[string]string
+	Cookie          string
+
+	// Differential comparison and advanced SEO
+	DiffBaseline    string
+	FailOnNewBroken bool
+	CheckSEO        bool
+
 	// Compiled filters
 	IncludeRegex *regexp.Regexp
 	ExcludeRegex *regexp.Regexp
@@ -66,6 +76,8 @@ func DefaultConfig() *Config {
 		Port:               8080,
 		RateLimitMs:        0,
 		Quiet:              false,
+		Headers:            make(map[string]string),
+		CheckSEO:           true,
 	}
 }
 
@@ -76,7 +88,15 @@ func ParseFlags(args []string) (*Config, error) {
 	fs := flag.NewFlagSet("brokenlens", flag.ContinueOnError)
 
 	var ignoreHostsStr string
+	var headersStr string
 	var timeoutSec int
+
+	fs.StringVar(&cfg.BasicAuth, "auth", "", "HTTP Basic Auth credentials in username:password format")
+	fs.StringVar(&headersStr, "header", "", "Custom HTTP header (key:value or multiple separated by ||)")
+	fs.StringVar(&cfg.Cookie, "cookie", "", "Custom Cookie header string")
+	fs.StringVar(&cfg.DiffBaseline, "diff", "", "Path to baseline report JSON file for differential comparison")
+	fs.BoolVar(&cfg.FailOnNewBroken, "fail-on-new-broken", false, "Exit with code 1 only if new broken items appear relative to baseline")
+	fs.BoolVar(&cfg.CheckSEO, "check-seo", cfg.CheckSEO, "Audit canonical tags, meta robots, social images, and soft 404s")
 
 	fs.IntVar(&cfg.Concurrency, "concurrency", cfg.Concurrency, "Number of concurrent worker routines (1-250)")
 	fs.IntVar(&cfg.Concurrency, "c", cfg.Concurrency, "Shorthand for --concurrency")
@@ -127,7 +147,7 @@ func ParseFlags(args []string) (*Config, error) {
 		"format": true, "junit": true, "markdown": true,
 		"host": true, "port": true, "report": true,
 		"ignore-hosts": true, "include": true, "exclude": true,
-		"delay": true,
+		"delay": true, "auth": true, "header": true, "cookie": true, "diff": true,
 	}
 
 	var flagArgs []string
@@ -177,6 +197,21 @@ func ParseFlags(args []string) (*Config, error) {
 			if cleaned != "" {
 				cfg.IgnoreHosts = append(cfg.IgnoreHosts, strings.ToLower(cleaned))
 			}
+		}
+	}
+
+	if headersStr != "" {
+		for _, h := range strings.Split(headersStr, "||") {
+			parts := strings.SplitN(strings.TrimSpace(h), ":", 2)
+			if len(parts) == 2 {
+				cfg.Headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
+			}
+		}
+	}
+
+	if cfg.DiffBaseline != "" {
+		if _, err := os.Stat(cfg.DiffBaseline); err != nil {
+			return nil, fmt.Errorf("diff baseline file not found: %s", cfg.DiffBaseline)
 		}
 	}
 

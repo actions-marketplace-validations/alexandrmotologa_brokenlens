@@ -151,4 +151,20 @@ func main() {
 			os.Exit(1)
 		}
 	}
+
+	// CI/CD Differential PR Gating: Fail only on NEW broken issues
+	if cfg.FailOnNewBroken {
+		if report.Diff == nil {
+			fmt.Fprintln(os.Stderr, "\n[brokenlens] Error: --fail-on-new-broken requires a baseline report specified via --diff <path>")
+			os.Exit(2)
+		}
+		if len(report.Diff.NewIssues) > 0 {
+			fmt.Fprintf(os.Stderr, "\n[brokenlens] CI/CD Differential Gating Failure: %d NEW broken issue(s) introduced relative to baseline %s.\n",
+				len(report.Diff.NewIssues), cfg.DiffBaseline)
+			for _, iss := range report.Diff.NewIssues {
+				fmt.Fprintf(os.Stderr, "  - [%s] %s (%s) on %s\n", iss.Severity, iss.TargetURL, iss.Type, iss.SourceURL)
+			}
+			os.Exit(1)
+		}
+	}
 }

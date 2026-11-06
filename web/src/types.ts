@@ -1,6 +1,7 @@
 export type AssetType =
   | 'link'
   | 'image'
+  | 'social_image'
   | 'script'
   | 'stylesheet'
   | 'preload'
@@ -17,7 +18,12 @@ export type IssueType =
   | 'anchor_not_found'
   | 'mixed_content_active'
   | 'mixed_content_passive'
-  | 'invalid_url';
+  | 'invalid_url'
+  | 'broken_canonical'
+  | 'canonical_mismatch'
+  | 'noindex_directive'
+  | 'soft_404'
+  | 'orphan_page';
 
 export type IssueSeverity = 'critical' | 'error' | 'warning' | 'info';
 
@@ -26,6 +32,7 @@ export interface InboundReference {
   assetType: AssetType;
   text?: string;
   fragment?: string;
+  snippet?: string;
 }
 
 export interface RedirectHop {
@@ -57,6 +64,9 @@ export interface CrawlResult {
   inboundSources?: InboundReference[];
   extractedLinks: number;
   extractedAssets: number;
+  robotsMeta?: string;
+  canonicalUrl?: string;
+  pageTitle?: string;
 }
 
 export interface AuditIssue {
@@ -69,6 +79,23 @@ export interface AuditIssue {
   errorMessage: string;
   assetType: AssetType;
   context?: string;
+  snippet?: string;
+  isInternal?: boolean;
+  isNew?: boolean;
+}
+
+export interface DiffSummary {
+  baselineReportPath: string;
+  newIssuesCount: number;
+  resolvedIssuesCount: number;
+  persistedIssuesCount: number;
+}
+
+export interface DiffReport {
+  baselineReportPath: string;
+  newIssues: AuditIssue[];
+  resolvedIssues: AuditIssue[];
+  persistedIssues: AuditIssue[];
 }
 
 export interface CrawlSummary {
@@ -84,10 +111,14 @@ export interface CrawlSummary {
   totalRedirects: number;
   totalMixedContent: number;
   totalMissingAnchors: number;
+  totalOrphanPages: number;
+  totalSoft404: number;
+  totalCanonicalIssues: number;
   healthScore: number;
   statusCodeDistribution: Record<string, number>;
   assetTypeDistribution: Record<string, number>;
   requestsPerSecond: number;
+  diff?: DiffSummary;
 }
 
 export interface AuditReport {
@@ -95,6 +126,7 @@ export interface AuditReport {
   issues: AuditIssue[];
   redirectChains: RedirectChain[];
   results?: CrawlResult[];
+  diff?: DiffReport;
 }
 
 export interface LiveProgress {

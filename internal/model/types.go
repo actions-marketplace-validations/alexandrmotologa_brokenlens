@@ -6,29 +6,35 @@ import "time"
 type AssetType string
 
 const (
-	AssetLink       AssetType = "link"
-	AssetImage      AssetType = "image"
-	AssetScript     AssetType = "script"
-	AssetStylesheet AssetType = "stylesheet"
-	AssetPreload    AssetType = "preload"
-	AssetMedia      AssetType = "media"
-	AssetCSS        AssetType = "css_url"
-	AssetCanonical  AssetType = "canonical"
-	AssetFavicon    AssetType = "favicon"
+	AssetLink        AssetType = "link"
+	AssetImage       AssetType = "image"
+	AssetSocialImage AssetType = "social_image"
+	AssetScript      AssetType = "script"
+	AssetStylesheet  AssetType = "stylesheet"
+	AssetPreload     AssetType = "preload"
+	AssetMedia       AssetType = "media"
+	AssetCSS         AssetType = "css_url"
+	AssetCanonical   AssetType = "canonical"
+	AssetFavicon     AssetType = "favicon"
 )
 
 // IssueType identifies specific failure classifications.
 type IssueType string
 
 const (
-	IssueBroken             IssueType = "broken_resource"
-	IssueTimeout            IssueType = "timeout"
-	IssueRedirectLoop       IssueType = "redirect_loop"
-	IssueExcessiveRedirects IssueType = "excessive_redirects"
-	IssueAnchorNotFound     IssueType = "anchor_not_found"
-	IssueMixedContentActive IssueType = "mixed_content_active"
+	IssueBroken              IssueType = "broken_resource"
+	IssueTimeout             IssueType = "timeout"
+	IssueRedirectLoop        IssueType = "redirect_loop"
+	IssueExcessiveRedirects  IssueType = "excessive_redirects"
+	IssueAnchorNotFound      IssueType = "anchor_not_found"
+	IssueMixedContentActive  IssueType = "mixed_content_active"
 	IssueMixedContentPassive IssueType = "mixed_content_passive"
-	IssueInvalidURL         IssueType = "invalid_url"
+	IssueInvalidURL          IssueType = "invalid_url"
+	IssueBrokenCanonical     IssueType = "broken_canonical"
+	IssueCanonicalMismatch   IssueType = "canonical_mismatch"
+	IssueNoIndexDirective    IssueType = "noindex_directive"
+	IssueSoft404             IssueType = "soft_404"
+	IssueOrphanPage          IssueType = "orphan_page"
 )
 
 // IssueSeverity indicates how severe an issue is.
@@ -47,6 +53,7 @@ type InboundReference struct {
 	AssetType AssetType `json:"assetType"`
 	Text      string    `json:"text,omitempty"`
 	Fragment  string    `json:"fragment,omitempty"`
+	Snippet   string    `json:"snippet,omitempty"`
 }
 
 // RedirectHop represents a single hop in an HTTP redirection chain.
@@ -82,6 +89,9 @@ type CrawlResult struct {
 	ExtractedLinks  int                `json:"extractedLinks"`
 	ExtractedAssets int                `json:"extractedAssets"`
 	DOMFragments    map[string]bool    `json:"-"` // Internal set of IDs and name attributes found
+	RobotsMeta      string             `json:"robotsMeta,omitempty"`
+	CanonicalURL    string             `json:"canonicalUrl,omitempty"`
+	PageTitle       string             `json:"pageTitle,omitempty"`
 }
 
 // AuditIssue represents a detected problem during the crawl.
@@ -95,6 +105,25 @@ type AuditIssue struct {
 	ErrorMessage string        `json:"errorMessage"`
 	AssetType    AssetType     `json:"assetType"`
 	Context      string        `json:"context,omitempty"`
+	Snippet      string        `json:"snippet,omitempty"`
+	IsInternal   bool          `json:"isInternal"`
+	IsNew        bool          `json:"isNew,omitempty"`
+}
+
+// DiffSummary provides high-level comparison metrics against a baseline report.
+type DiffSummary struct {
+	BaselineReportPath   string `json:"baselineReportPath"`
+	NewIssuesCount       int    `json:"newIssuesCount"`
+	ResolvedIssuesCount  int    `json:"resolvedIssuesCount"`
+	PersistedIssuesCount int    `json:"persistedIssuesCount"`
+}
+
+// DiffReport stores detailed lists of new, resolved, and persisted issues.
+type DiffReport struct {
+	BaselineReportPath string       `json:"baselineReportPath"`
+	NewIssues          []AuditIssue `json:"newIssues"`
+	ResolvedIssues     []AuditIssue `json:"resolvedIssues"`
+	PersistedIssues    []AuditIssue `json:"persistedIssues"`
 }
 
 // CrawlSummary provides aggregate metrics for the entire audit session.
@@ -111,10 +140,14 @@ type CrawlSummary struct {
 	TotalRedirects         int            `json:"totalRedirects"`
 	TotalMixedContent      int            `json:"totalMixedContent"`
 	TotalMissingAnchors    int            `json:"totalMissingAnchors"`
+	TotalOrphanPages       int            `json:"totalOrphanPages"`
+	TotalSoft404           int            `json:"totalSoft404"`
+	TotalCanonicalIssues   int            `json:"totalCanonicalIssues"`
 	HealthScore            float64        `json:"healthScore"`
 	StatusCodeDistribution map[string]int `json:"statusCodeDistribution"`
 	AssetTypeDistribution  map[string]int `json:"assetTypeDistribution"`
 	RequestsPerSecond      float64        `json:"requestsPerSecond"`
+	Diff                   *DiffSummary   `json:"diff,omitempty"`
 }
 
 // AuditReport is the full serialized report data model.
@@ -123,4 +156,5 @@ type AuditReport struct {
 	Issues         []AuditIssue    `json:"issues"`
 	RedirectChains []RedirectChain `json:"redirectChains"`
 	Results        []CrawlResult   `json:"results,omitempty"`
+	Diff           *DiffReport     `json:"diff,omitempty"`
 }

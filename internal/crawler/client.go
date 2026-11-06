@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,16 +18,17 @@ import (
 
 // FetchResponse wraps the HTTP response details and content.
 type FetchResponse struct {
-	StatusCode    int
-	StatusText    string
-	DurationMs    int64
-	ContentType   string
-	ContentLength int64
-	FinalURL      string
-	RedirectChain []model.RedirectHop
+	StatusCode     int
+	StatusText     string
+	DurationMs     int64
+	ContentType    string
+	ContentLength  int64
+	FinalURL       string
+	RedirectChain  []model.RedirectHop
 	IsRedirectLoop bool
-	Body          []byte
-	Error         error
+	XRobotsTag     string
+	Body           []byte
+	Error          error
 }
 
 // HTTPClient manages outbound HTTP requests with connection pooling and redirect tracking.
@@ -92,6 +94,24 @@ func (c *HTTPClient) Fetch(ctx context.Context, targetURL string, method string,
 		req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8")
 		req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
+		// Custom Headers
+		for k, v := range c.cfg.Headers {
+			req.Header.Set(k, v)
+		}
+
+		// Cookie
+		if c.cfg.Cookie != "" {
+			req.Header.Set("Cookie", c.cfg.Cookie)
+		}
+
+		// Basic Auth
+		if c.cfg.BasicAuth != "" {
+			parts := strings.SplitN(c.cfg.BasicAuth, ":", 2)
+			if len(parts) == 2 {
+				req.SetBasicAuth(parts[0], parts[1])
+			}
+		}
+
 		resp, err := c.client.Do(req)
 		if err != nil {
 			// External servers might reject HEAD; fallback to GET if method was HEAD
@@ -108,9 +128,33 @@ func (c *HTTPClient) Fetch(ctx context.Context, targetURL string, method string,
 		}
 
 		statusCode := resp.StatusCode
+
+		// Smart retry on 429 Too Many Requests or 503 with Retry-After header
+		if statusCode == http.StatusTooManyRequests || statusCode == http.StatusServiceUnavailable {
+			retryAfterStr := resp.Header.Get("Retry-After")
+			_ = resp.Body.Close()
+			if retryAfterStr != "" {
+				waitSec := 1
+				if s, err := strconv.Atoi(retryAfterStr); err == nil && s > 0 {
+					if s > 3 {
+						waitSec = 3 // Cap retry backoff to 3 seconds
+					} else {
+						waitSec = s
+					}
+				}
+				time.Sleep(time.Duration(waitSec) * time.Second)
+				// Re-attempt once
+				resp, err = c.client.Do(req)
+				if err == nil {
+					statusCode = resp.StatusCode
+				}
+			}
+		}
+
 		statusText := http.StatusText(statusCode)
 		contentType := resp.Header.Get("Content-Type")
 		contentLength := resp.ContentLength
+		xRobotsTag := resp.Header.Get("X-Robots-Tag")
 
 		// Handle Redirection (301, 302, 303, 307, 308)
 		if isRedirect(statusCode) {
@@ -201,6 +245,7 @@ func (c *HTTPClient) Fetch(ctx context.Context, targetURL string, method string,
 			ContentLength: contentLength,
 			FinalURL:      currentURL,
 			RedirectChain: chain,
+			XRobotsTag:    xRobotsTag,
 			Body:          bodyBytes,
 		}
 	}

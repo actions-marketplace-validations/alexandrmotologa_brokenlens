@@ -16,12 +16,20 @@ It runs as a standalone single-binary command-line tool, executes crawls at high
 
 - **High-Concurrency Engine**: Asynchronous crawler written in Go with connection pooling, keep-alive transport, and DNS reuse.
 - **Deep HTML Asset Extraction**: Inspects `<a>`, `<area>`, `<img>`, `srcset`, `<picture>`, `<script>`, `<link rel="stylesheet">`, `<link rel="preload">`, inline CSS `url(...)`, and `<video>/<audio>` tags.
+- **HTML Snippet Capture**: Records the exact HTML element string for every discovered link or asset, pinpointing broken items in source templates.
 - **In-Page Fragment Validation**: Verifies that `#section-name` fragments point to actual DOM `id` or `<a name>` elements on the target page.
+- **Technical SEO Auditing**:
+  - **Canonical Consistency**: Validates `<link rel="canonical">` targets for 404s and HTTP-over-HTTPS scheme mismatches.
+  - **Meta Robots & X-Robots-Tag**: Flags `noindex` and `nofollow` directives preventing page discovery.
+  - **Social Media Cards**: Audits `<meta property="og:image">` and `twitter:image` preview assets.
+  - **Soft 404 Detection**: Flags pages returning HTTP 200 OK with "404 Not Found" page titles or empty error bodies.
+  - **Orphan Page Detection**: Identifies internal pages with zero inbound links.
 - **Mixed Content Detection**: Flags insecure `http://` assets referenced on `https://` parent pages, categorizing them into Active (critical) and Passive (warning) violations.
 - **Redirect Chain Tracer**: Traces multi-hop redirects (301, 302, 307, 308) and detects circular loops ($A \to B \to A$).
-- **External Link Optimization**: Uses HEAD-first requests with automatic GET fallbacks to check external links without unnecessary bandwidth consumption.
-- **CI/CD Quality Gating**: Returns exit code 1 with `--fail-on-broken` when broken items or critical issues are found, integrating directly with GitHub Actions, GitLab CI, and Jenkins.
-- **Embedded Web Studio**: React 19 dashboard embedded inside the binary via `embed.FS` with real-time Server-Sent Events (SSE) updates and interactive search and filtering.
+- **Differential PR Gating**: Compares current scans against baseline reports (`--diff baseline.json`) with `--fail-on-new-broken` to fail CI only when a pull request introduces *new* regressions.
+- **Protected Staging Audits**: Supports HTTP Basic Auth (`--auth`), custom headers (`--header`), and session cookies (`--cookie`).
+- **Resilient Rate Limiting**: Automatically handles HTTP 429 and 503 responses with `Retry-After` backoff.
+- **Embedded Web Studio**: React 19 dashboard embedded inside the binary via `embed.FS` with real-time Server-Sent Events (SSE) updates, interactive filtering, and code snippet inspection.
 
 ---
 
@@ -47,17 +55,27 @@ This compiles the React 19 frontend into `web/dist` and produces the `brokenlens
 ./brokenlens https://example.com
 ```
 
-### CI/CD Pipeline Scan with Gating
+### Staging Scan with Authentication & Custom Headers
 
 ```bash
-./brokenlens https://example.com \
-  --concurrency 50 \
-  --max-depth 5 \
-  --check-external \
-  --fail-on-broken \
-  --output report.json \
-  --junit junit.xml
+./brokenlens https://staging.example.com \
+  --auth "admin:secretPass" \
+  --header "X-Staging-Access: allowed" \
+  --cookie "session_id=xyz"
 ```
+
+### CI/CD Differential PR Gating
+
+Compare the current pull request branch against a baseline report from `main`:
+
+```bash
+./brokenlens https://pr-123.preview.example.com \
+  --diff baseline-main.json \
+  --fail-on-new-broken \
+  --output report.json
+```
+
+The process exits with code 1 *only* if the pull request introduces new broken items, ignoring pre-existing legacy issues.
 
 ### Launch Interactive Report Studio
 
@@ -65,7 +83,7 @@ This compiles the React 19 frontend into `web/dist` and produces the `brokenlens
 ./brokenlens https://example.com --serve --port 8080
 ```
 
-Open `http://127.0.0.1:8080` in your browser to view live crawl progress, search broken assets, inspect redirect chains, and export CSV/JSON reports.
+Open `http://127.0.0.1:8080` in your browser to view live crawl progress, search broken assets, inspect redirect chains, view HTML snippets, and export CSV/JSON reports.
 
 ### Inspect Saved Report in Web Studio
 
@@ -83,13 +101,19 @@ Open `http://127.0.0.1:8080` in your browser to view live crawl progress, search
 | `--max-depth` | `-d` | `10` | Maximum link crawl depth (0 = unlimited) |
 | `--max-urls` | | `0` | Maximum number of URLs to crawl (0 = unlimited) |
 | `--timeout` | | `10` | Per-request timeout in seconds |
+| `--auth` | | `""` | HTTP Basic Auth credentials (`user:password`) |
+| `--header` | | `""` | Custom HTTP headers (`Key: Value`, multiple separated by `\|\|`) |
+| `--cookie` | | `""` | Custom Cookie header string |
+| `--diff` | | `""` | Path to baseline report JSON file for differential comparison |
+| `--fail-on-broken` | | `false` | Exit with code 1 if broken links or critical issues are found |
+| `--fail-on-new-broken` | | `false` | Exit with code 1 only if new broken items appear relative to baseline |
+| `--check-seo` | | `true` | Audit canonical tags, meta robots, social images, and soft 404s |
 | `--check-external` | | `true` | Verify HTTP status of external links |
 | `--check-fragments` | | `true` | Verify in-page `#anchor` existence in target DOM |
 | `--check-mixed-content` | | `true` | Detect HTTP assets on HTTPS pages |
 | `--robots` | | `true` | Respect robots.txt exclusion rules |
 | `--sitemap` | | `true` | Auto-discover and crawl URLs from sitemap.xml |
 | `--max-redirects` | | `10` | Maximum redirect hops before reporting failure |
-| `--fail-on-broken` | | `false` | Exit with code 1 if broken links or critical issues are found |
 | `--max-broken` | | `0` | Maximum allowed broken items before exiting with failure |
 | `--output` | `-o` | `""` | Export report file path (.json, .csv) |
 | `--junit` | | `""` | Export JUnit XML report file path |
@@ -106,13 +130,9 @@ Open `http://127.0.0.1:8080` in your browser to view live crawl progress, search
 ## GitHub Actions Example
 
 ```yaml
-name: Broken Link Check
+name: Pull Request Link & SEO Audit
 
-on:
-  push:
-    branches: [ main ]
-  schedule:
-    - cron: '0 3 * * *'
+on: [pull_request]
 
 jobs:
   audit:
@@ -120,15 +140,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run BrokenLens
+      - name: Download Baseline Report
+        run: curl -s https://example.com/reports/main.json -o baseline.json || echo "{}" > baseline.json
+
+      - name: Run BrokenLens Differential Gate
         uses: alexandrmotologa/brokenlens@main
         with:
-          url: 'https://example.com'
+          url: 'https://staging.example.com'
           concurrency: '30'
           max-depth: '5'
-          fail-on-broken: 'true'
-          output: 'report.json'
+          fail-on-broken: 'false'
+          output: 'pr-report.json'
           junit: 'junit.xml'
+
+      - name: Verify No Regressions
+        run: |
+          go run ./cmd/brokenlens https://staging.example.com \
+            --diff baseline.json \
+            --fail-on-new-broken
 ```
 
 ---

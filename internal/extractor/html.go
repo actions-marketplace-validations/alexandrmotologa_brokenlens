@@ -17,6 +17,7 @@ type DiscoveredTarget struct {
 	AssetType model.AssetType
 	Text      string
 	Fragment  string
+	Snippet   string
 }
 
 // ExtractionResult holds all links, assets, and DOM fragments extracted from a page.
@@ -25,9 +26,10 @@ type ExtractionResult struct {
 	DOMFragments map[string]bool
 	PageTitle    string
 	CanonicalURL string
+	RobotsMeta   string
 }
 
-// ExtractHTML parses an HTML document stream and extracts all references and DOM IDs.
+// ExtractHTML parses an HTML document stream and extracts all references, snippets, and DOM IDs.
 func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 	tokenizer := html.NewTokenizer(r)
 
@@ -51,6 +53,7 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 		}
 
 		tok := tokenizer.Token()
+		rawTagSnippet := tok.String()
 
 		switch tt {
 		case html.StartTagToken, html.SelfClosingTagToken:
@@ -67,6 +70,7 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 							RawURL:    cu,
 							AssetType: model.AssetCSS,
 							Text:      "inline style",
+							Snippet:   rawTagSnippet,
 						})
 					}
 				}
@@ -81,6 +85,44 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 			case atom.Style:
 				inStyle = true
 				styleBuf.Reset()
+
+			case atom.Meta:
+				var name, property, content string
+				for _, attr := range tok.Attr {
+					switch strings.ToLower(attr.Key) {
+					case "name":
+						name = strings.ToLower(strings.TrimSpace(attr.Val))
+					case "property":
+						property = strings.ToLower(strings.TrimSpace(attr.Val))
+					case "content":
+						content = strings.TrimSpace(attr.Val)
+					}
+				}
+
+				// Meta Robots
+				if (name == "robots" || name == "googlebot") && content != "" {
+					result.RobotsMeta = content
+				}
+
+				// OpenGraph Image
+				if (property == "og:image" || property == "og:image:url") && content != "" {
+					result.Targets = append(result.Targets, DiscoveredTarget{
+						RawURL:    content,
+						AssetType: model.AssetSocialImage,
+						Text:      "og:image",
+						Snippet:   rawTagSnippet,
+					})
+				}
+
+				// Twitter Card Image
+				if (name == "twitter:image" || property == "twitter:image") && content != "" {
+					result.Targets = append(result.Targets, DiscoveredTarget{
+						RawURL:    content,
+						AssetType: model.AssetSocialImage,
+						Text:      "twitter:image",
+						Snippet:   rawTagSnippet,
+					})
+				}
 
 			case atom.A, atom.Area:
 				var href, text, nameAttr string
@@ -104,6 +146,7 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 						AssetType: model.AssetLink,
 						Text:      text,
 						Fragment:  frag,
+						Snippet:   rawTagSnippet,
 					})
 				}
 
@@ -124,6 +167,7 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 						RawURL:    src,
 						AssetType: model.AssetImage,
 						Text:      alt,
+						Snippet:   rawTagSnippet,
 					})
 				}
 				if srcset != "" {
@@ -132,6 +176,7 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 							RawURL:    su,
 							AssetType: model.AssetImage,
 							Text:      alt,
+							Snippet:   rawTagSnippet,
 						})
 					}
 				}
@@ -150,6 +195,7 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 					result.Targets = append(result.Targets, DiscoveredTarget{
 						RawURL:    src,
 						AssetType: model.AssetImage,
+						Snippet:   rawTagSnippet,
 					})
 				}
 				if srcset != "" {
@@ -157,6 +203,7 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 						result.Targets = append(result.Targets, DiscoveredTarget{
 							RawURL:    su,
 							AssetType: model.AssetImage,
+							Snippet:   rawTagSnippet,
 						})
 					}
 				}
@@ -167,6 +214,7 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 						result.Targets = append(result.Targets, DiscoveredTarget{
 							RawURL:    strings.TrimSpace(attr.Val),
 							AssetType: model.AssetScript,
+							Snippet:   rawTagSnippet,
 						})
 					}
 				}
@@ -197,6 +245,7 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 					result.Targets = append(result.Targets, DiscoveredTarget{
 						RawURL:    href,
 						AssetType: assetType,
+						Snippet:   rawTagSnippet,
 					})
 				}
 
@@ -206,6 +255,7 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 						result.Targets = append(result.Targets, DiscoveredTarget{
 							RawURL:    strings.TrimSpace(attr.Val),
 							AssetType: model.AssetMedia,
+							Snippet:   rawTagSnippet,
 						})
 					}
 				}
@@ -216,6 +266,7 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 						result.Targets = append(result.Targets, DiscoveredTarget{
 							RawURL:    strings.TrimSpace(attr.Val),
 							AssetType: model.AssetMedia,
+							Snippet:   rawTagSnippet,
 						})
 					}
 				}
@@ -226,6 +277,7 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 						result.Targets = append(result.Targets, DiscoveredTarget{
 							RawURL:    strings.TrimSpace(attr.Val),
 							AssetType: model.AssetLink,
+							Snippet:   rawTagSnippet,
 						})
 					}
 				}
@@ -253,6 +305,7 @@ func ExtractHTML(r io.Reader, baseURL string) (*ExtractionResult, error) {
 						RawURL:    cu,
 						AssetType: model.AssetCSS,
 						Text:      "stylesheet block",
+						Snippet:   "/* style block */",
 					})
 				}
 			}
@@ -271,7 +324,6 @@ func extractFragment(rawURL string) string {
 	idx := strings.IndexByte(rawURL, '#')
 	if idx >= 0 && idx < len(rawURL)-1 {
 		frag := rawURL[idx+1:]
-		// URL decode fragment
 		if unescaped, err := url.PathUnescape(frag); err == nil {
 			return unescaped
 		}
@@ -289,7 +341,6 @@ func parseSrcset(srcset string) []string {
 		if trimmed == "" {
 			continue
 		}
-		// Split by whitespace: URL is the first component
 		fields := strings.Fields(trimmed)
 		if len(fields) > 0 {
 			urls = append(urls, fields[0])

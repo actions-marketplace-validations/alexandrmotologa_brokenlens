@@ -24,6 +24,9 @@ func WriteCSV(w io.Writer, issues []model.AuditIssue) error {
 		"SourceURL",
 		"AssetType",
 		"Context",
+		"Snippet",
+		"IsInternal",
+		"IsNew",
 		"ErrorMessage",
 	}
 
@@ -37,6 +40,16 @@ func WriteCSV(w io.Writer, issues []model.AuditIssue) error {
 			statusStr = strconv.Itoa(issue.StatusCode)
 		}
 
+		isInternalStr := "false"
+		if issue.IsInternal {
+			isInternalStr = "true"
+		}
+
+		isNewStr := "false"
+		if issue.IsNew {
+			isNewStr = "true"
+		}
+
 		row := []string{
 			issue.ID,
 			string(issue.Type),
@@ -46,6 +59,9 @@ func WriteCSV(w io.Writer, issues []model.AuditIssue) error {
 			issue.SourceURL,
 			string(issue.AssetType),
 			issue.Context,
+			issue.Snippet,
+			isInternalStr,
+			isNewStr,
 			issue.ErrorMessage,
 		}
 

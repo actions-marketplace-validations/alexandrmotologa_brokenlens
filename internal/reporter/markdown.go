@@ -28,7 +28,20 @@ func WriteMarkdown(w io.Writer, report *model.AuditReport) error {
 	fmt.Fprintf(w, "| Redirect Chains | %d |\n", s.TotalRedirects)
 	fmt.Fprintf(w, "| Mixed Content Warnings | %d |\n", s.TotalMixedContent)
 	fmt.Fprintf(w, "| Missing Anchors (#id) | %d |\n", s.TotalMissingAnchors)
+	fmt.Fprintf(w, "| Orphan Pages | %d |\n", s.TotalOrphanPages)
+	fmt.Fprintf(w, "| Soft 404 Pages | %d |\n", s.TotalSoft404)
+	fmt.Fprintf(w, "| Canonical Issues | %d |\n", s.TotalCanonicalIssues)
 	fmt.Fprintln(w)
+
+	if s.Diff != nil {
+		fmt.Fprintf(w, "### Differential PR Audit (vs `%s`)\n\n", s.Diff.BaselineReportPath)
+		fmt.Fprintln(w, "| Comparison Metric | Count |")
+		fmt.Fprintln(w, "| :--- | :--- |")
+		fmt.Fprintf(w, "| **NEW Issues (introduced)** | **%d** |\n", s.Diff.NewIssuesCount)
+		fmt.Fprintf(w, "| Resolved Issues (fixed) | %d |\n", s.Diff.ResolvedIssuesCount)
+		fmt.Fprintf(w, "| Persisted Issues (pre-existing) | %d |\n", s.Diff.PersistedIssuesCount)
+		fmt.Fprintln(w)
+	}
 
 	if len(report.Issues) > 0 {
 		fmt.Fprintf(w, "### Detected Issues (%d total)\n\n", len(report.Issues))

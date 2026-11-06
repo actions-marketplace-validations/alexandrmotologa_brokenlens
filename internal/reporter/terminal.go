@@ -55,8 +55,18 @@ func (t *TerminalReporter) RenderSummary(report *model.AuditReport) {
 	fmt.Fprintf(t.w, "  Total URLs Scanned: %-6d  |  Internal URLs:     %-6d\n", s.TotalScanned, s.TotalInternal)
 	fmt.Fprintf(t.w, "  Total Broken:       %-6d  |  External URLs:     %-6d\n", s.TotalBroken, s.TotalExternal)
 	fmt.Fprintf(t.w, "  Redirect Chains:    %-6d  |  Mixed Content:     %-6d\n", s.TotalRedirects, s.TotalMixedContent)
-	fmt.Fprintf(t.w, "  Missing Anchors:    %-6d  |  Unique Visited:    %-6d\n", s.TotalMissingAnchors, s.TotalUnique)
+	fmt.Fprintf(t.w, "  Missing Anchors:    %-6d  |  Orphan Pages:      %-6d\n", s.TotalMissingAnchors, s.TotalOrphanPages)
+	fmt.Fprintf(t.w, "  Soft 404 Pages:     %-6d  |  Canonical Issues:  %-6d\n", s.TotalSoft404, s.TotalCanonicalIssues)
 	fmt.Fprintln(t.w, "--------------------------------------------------------------------------------")
+
+	// Differential Summary if present
+	if s.Diff != nil {
+		fmt.Fprintf(t.w, "  DIFFERENTIAL PR AUDIT (vs %s)\n", s.Diff.BaselineReportPath)
+		fmt.Fprintf(t.w, "  - NEW Issues:       %-6d (introduced in this run)\n", s.Diff.NewIssuesCount)
+		fmt.Fprintf(t.w, "  - RESOLVED Issues:  %-6d (fixed since baseline)\n", s.Diff.ResolvedIssuesCount)
+		fmt.Fprintf(t.w, "  - Persisted Issues: %-6d (pre-existing)\n", s.Diff.PersistedIssuesCount)
+		fmt.Fprintln(t.w, "--------------------------------------------------------------------------------")
+	}
 
 	// Status code breakdown
 	fmt.Fprint(t.w, "  Status Breakdown:  ")
@@ -83,7 +93,13 @@ func (t *TerminalReporter) RenderSummary(report *model.AuditReport) {
 				statusStr = "ERR"
 			}
 
-			fmt.Fprintf(t.w, "  [%s] [%s] %s (HTTP %s)\n",
+			newTag := ""
+			if issue.IsNew {
+				newTag = "[NEW] "
+			}
+
+			fmt.Fprintf(t.w, "  %s[%s] [%s] %s (HTTP %s)\n",
+				newTag,
 				strings.ToUpper(string(issue.Severity)),
 				issue.Type,
 				issue.TargetURL,
@@ -94,6 +110,9 @@ func (t *TerminalReporter) RenderSummary(report *model.AuditReport) {
 			}
 			if issue.Context != "" {
 				fmt.Fprintf(t.w, "        Context:  %s\n", issue.Context)
+			}
+			if issue.Snippet != "" {
+				fmt.Fprintf(t.w, "        Snippet:  %s\n", issue.Snippet)
 			}
 			if issue.ErrorMessage != "" {
 				fmt.Fprintf(t.w, "        Reason:   %s\n", issue.ErrorMessage)
